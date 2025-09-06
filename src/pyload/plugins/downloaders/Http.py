@@ -16,7 +16,10 @@ class Http(BaseDownloader):
     __status__ = "testing"
 
     __pattern__ = r"(?:jd|pys?)://.+"
-    __config__ = [("enabled", "bool", "Activated", True)]
+    __config__ = [
+        ("enabled", "bool", "Activated", True),
+        ("nochuncklimit", "bool", "Unlimited chuck number", True),
+    ]
 
     __description__ = """Download simple http link"""
     __license__ = "GPLv3"
@@ -26,7 +29,7 @@ class Http(BaseDownloader):
     ]
 
     def setup(self):
-        self.chunk_limit = -1
+        self.chunk_limit = -1 if self.nochuncklimit else 1
         self.resume_download = True
 
     def load_account(self):
