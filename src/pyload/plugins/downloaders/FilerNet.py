@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
-import os
+import json
 import re
 
-from ..anticaptchas.ReCaptcha import ReCaptcha
+from pyload.core.network.http.exceptions import BadHeader
+
+from ..anticaptchas.HCaptcha import HCaptcha
 from ..base.simple_downloader import SimpleDownloader
 
 
 class FilerNet(SimpleDownloader):
     __name__ = "FilerNet"
     __type__ = "downloader"
-    __version__ = "0.31"
+    __version__ = "0.34"
     __status__ = "testing"
 
-    __pattern__ = r"https?://(?:www\.)?filer\.net/get/\w+"
+    __pattern__ = r"https?://(?:www\.)?filer\.net/get/(?P<ID>\w+)"
     __config__ = [
         ("enabled", "bool", "Activated", True),
         ("use_premium", "bool", "Use premium account if available", True),
@@ -29,43 +31,66 @@ class FilerNet(SimpleDownloader):
         ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com"),
     ]
 
-    INFO_PATTERN = r'<h1 class="page-header">Free Download (?P<N>\S+) <small>(?P<S>[\w.]+) (?P<U>[\w^_]+)</small></h1>'
+    HCAPTCHA_KEY = "45623a98-7b08-43ae-b758-c21c13024e2a"
 
-    OFFLINE_PATTERN = r"Datei +nicht mehr vorhanden"
-    TEMP_OFFLINE_PATTERN = r"Leider sind alle kostenlosen Download-Slots belegt"
+    # See https://filer.net/api
+    API_URL = "https://filer.net/api/"
 
-    WAIT_PATTERN = r"var count = (\d+);"
+    def api_request(self, method, **kwargs):
+        try:
+            json_data = self.load(self.API_URL + method, post=kwargs)
+        except BadHeader as exc:
+            json_data = exc.content
 
-    LINK_PATTERN = r'href="([^"]+)">Get download</a>'
+        return json.loads(json_data)
+
+    def api_info(self, url):
+        info = {}
+        file_id = re.match(self.__pattern__, url).group("ID")
+
+        api_data = self.api_request(f"file/{file_id}")
+        if api_data.get("message") == "File not found":
+            info["status"] = 1
+        else:
+            info.update({
+                "name": api_data["name"],
+                "size": api_data["size"],
+                "premium_only": api_data["premiumOnly"],
+                "status": 2
+            })
+
+        return info
 
     def handle_free(self, pyfile):
-        inputs = self.parse_html_form(input_names={"token": re.compile(r".+")})[1]
-        if inputs is None or "token" not in inputs:
-            self.retry()
+        if self.info["premium_only"] is True:
+            self.fail(self._("File can be downloaded by premium users only"))
 
-        self.data = self.load(pyfile.url, post={"token": inputs["token"]})
+        file_id = self.info["pattern"]["ID"]
 
-        inputs = self.parse_html_form(input_names={"hash": re.compile(r".+")})[1]
-        if inputs is None or "hash" not in inputs:
-            self.error(self._("Unable to detect hash"))
+        api_data = self.api_request(f"file/request/{file_id}")
+        if "error" in api_data:
+            self.fail(api_data["error"])
 
-        self.captcha = ReCaptcha(pyfile)
-        response = self.captcha.challenge()
+        wait_time = api_data.get("wt", 0)
+        if wait_time > 0:
+            self.set_wait(wait_time)
+            self.captcha = HCaptcha(pyfile)
+            captcha_response = self.captcha.challenge(self.HCAPTCHA_KEY)
+            self.wait()
+            api_data = self.api_request("file/download", ticket=api_data["t"], recaptcha=captcha_response)
+        else:
+            api_data = self.api_request("file/download", ticket=api_data["t"])
 
-        self.download(
-            pyfile.url, post={"g-recaptcha-response": response, "hash": inputs["hash"]}
-        )
-
-        if self.scan_download({"html": re.compile(rb"\A\s*<!DOCTYPE html")}) == "html":
-            with open(self.last_download, "r") as f:
-                self.data = f.read()
-            os.remove(self.last_download)
-
-            if re.search(self.TEMP_OFFLINE_PATTERN, self.data) is not None:
-                self.temp_offline()
-
+        error = api_data.get("error")
+        if error:
+            self.log_error(error)
+            if error == "HOURLY_DOWNLOAD_LIMIT":
+                self.retry(wait=3600)
             else:
-                return SimpleDownloader.check_download(self)
+                self.fail(error)
 
         else:
-            return SimpleDownloader.check_download(self)
+            self.link = api_data["downloadUrl"]
+
+    def handle_premium(self, pyfile):
+        self.handle_free(pyfile)

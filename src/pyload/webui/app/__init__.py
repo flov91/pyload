@@ -72,10 +72,9 @@ class App:
         # Dynamically set SESSION_COOKIE_SECURE according to the value of X-Forwarded-Proto
         @app.before_request
         def set_session_cookie_secure():
-            x_forwarded_proto = flask.request.headers.get("X-Forwarded-Proto")
-            if x_forwarded_proto is not None:
-                is_secure = x_forwarded_proto.split(',')[0].strip() == "https"
-                flask.current_app.config['SESSION_COOKIE_SECURE'] = is_secure
+            x_forwarded_proto = flask.request.headers.get("X-Forwarded-Proto", "")
+            is_secure = x_forwarded_proto.split(',')[0].strip() == "https"
+            flask.current_app.config['SESSION_COOKIE_SECURE'] = is_secure
 
     @classmethod
     def _configure_json_encoding(cls, app):
@@ -123,6 +122,7 @@ class App:
         app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
         app.config["SESSION_COOKIE_SECURE"] = app.config["PYLOAD_API"].get_config_value("webui", "use_ssl")
         app.config["SESSION_PERMANENT"] = False
+        app.config["SESSION_REFRESH_EACH_REQUEST"] = False
 
         session_lifetime = max(app.config["PYLOAD_API"].get_config_value("webui", "session_lifetime"), 1) * 60
         app.config["PERMANENT_SESSION_LIFETIME"] = session_lifetime

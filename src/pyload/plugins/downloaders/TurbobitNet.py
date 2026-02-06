@@ -70,14 +70,14 @@ class TurbobitNet(SimpleDownloader):
         wait_time = eval_js(m.group(1))
         self.wait(wait_time)
 
-        self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With: XMLHttpRequest"])
+        self.req.http.set_header("X-Requested-With", "XMLHttpRequest")
         self.data = self.load(
             "https://turbobit.net/download/getLinkTimeout/{}".format(
                 self.info["pattern"]["ID"]
             ),
-            ref=self.free_url,
+            referrer=self.free_url,
         )
-        self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With:"])
+        self.req.http.remove_header("X-Requested-With")
 
         if "/download/started/" in self.data:
             self.data = self.load(
@@ -112,7 +112,7 @@ class TurbobitNet(SimpleDownloader):
                     inputs["g-recaptcha-response"] = inputs["h-captcha-response"] = response
 
             if captcha_key:
-                self.data = self.load(self.free_url, post=inputs, ref=self.free_url)
+                self.data = self.load(self.free_url, post=inputs, referrer=self.free_url)
 
             else:
                 self.fail(self._("Could not detect captcha type"))

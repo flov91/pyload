@@ -2,15 +2,16 @@
 <html lang="en">
 
 <head>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
   <link rel="stylesheet" type="text/css" href="{{theme_static('vendor/Bootstrap/css/bootstrap.min.css')}}">
-  <link rel="stylesheet" type="text/css" href="{{theme_static('vendor/jQuery/jQuery UI/jquery-ui.min.css')}}"/>
-  <link rel="stylesheet" type="text/css" href="{{theme_static('vendor/mdtoast/css/mdtoast.min.css')}}"/>
+  <link rel="stylesheet" type="text/css" href="{{theme_static('vendor/jQuery/jQuery UI/jquery-ui.min.css')}}" />
+  <link rel="stylesheet" type="text/css" href="{{theme_static('vendor/mdtoast/css/mdtoast.min.css')}}" />
   <link rel="stylesheet" type="text/css" href="{{theme_static('css/base.css')}}" />
 
-  <link rel="icon" href="{{theme_static('img/favicon.ico')}}"/>
+  <link rel="icon" href="{{theme_static('img/favicon.ico')}}" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
 
 <style type="text/css">
 .ui-icon,
@@ -212,7 +213,7 @@
 </div>
 
 <hr style="clear: both;" />
-<div id="foot" class="navbar navbar-static-bottom navbar-inverse" style="width: 100%; text-align:center;">&copy; 2008-2025 pyLoad team</div>
+<div id="foot" class="navbar navbar-static-bottom navbar-inverse" style="width: 100%; text-align:center;">&copy; 2008-2026 pyLoad team</div>
 
 <div id="goto_top" class="btn-dark hidden" style="position: fixed; width: 25px; height: 25px;background-color: #eeeeee; color: #282828; opacity: 0.5; cursor: pointer; z-index: 10; border-radius: 5px; display: block;" title="{{_('Back to top')}}">
   <div class="glyphicon glyphicon-chevron-up" style="padding-top: 5px; padding-left: 6px; opacity: 0.5;"></div>

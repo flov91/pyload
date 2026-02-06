@@ -8,7 +8,7 @@ from ..base.simple_downloader import SimpleDownloader
 class OneFichierCom(SimpleDownloader):
     __name__ = "OneFichierCom"
     __type__ = "downloader"
-    __version__ = "1.19"
+    __version__ = "1.21"
     __status__ = "testing"
 
     __pattern__ = r"https?://(?:www\.)?(?:(?P<ID1>\w+)\.)?(?P<HOST>1fichier\.com|alterupload\.com|cjoint\.net|d(?:es)?fichiers\.com|dl4free\.com|megadl\.fr|mesfichiers\.org|piecejointe\.net|pjointe\.com|tenvoi\.com)(?:/\?(?P<ID2>\w+))?"
@@ -44,14 +44,15 @@ class OneFichierCom(SimpleDownloader):
 
     COOKIES = [("1fichier.com", "LG", "en")]
 
-    NAME_PATTERN = r">Filename :</td>\s*<td.*>(?P<N>.+?)<"
-    SIZE_PATTERN = r">Size :</td>\s*<td.*>(?P<S>[\d.,]+) (?P<U>[\w^_]+)"
+    NAME_PATTERN = r'<td class="normal"><span style="font-weight:bold">(?P<N>.+?)<'
+    SIZE_PATTERN = r"<span .*>(?P<S>[\d.,]+) (?P<U>[\w^_]+)</span></td>"
     OFFLINE_PATTERN = r"(?:File not found !\s*<|>\s*The requested file (?:has been deleted|do(?:es)? not exist))"
     LINK_PATTERN = r'<a href="(.+?)".*>Click here to download the file</a>'
     TEMP_OFFLINE_PATTERN = r"Without subscription, you can only download one file at|Our services are in maintenance"
     PREMIUM_ONLY_PATTERN = r"is not possible to unregistered users|need a subscription"
 
     WAIT_PATTERN = r">You must wait \d+ minutes"
+    DL_LIMIT_PATTERN = r"Free download in ⏳ \d+"
 
     def setup(self):
         self.multi_dl = self.premium

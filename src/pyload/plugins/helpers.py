@@ -16,7 +16,6 @@ import time
 import traceback
 import zlib
 from base64 import b85decode, b85encode
-from datetime import timedelta
 
 from ..core.utils.convert import to_bytes, to_str
 
@@ -188,23 +187,28 @@ def sign_string(message, pem_private, pem_passphrase="", sign_algo="SHA384"):
     """
     Generate a signature for string using the `sign_algo` and `RSA` algorithms.
     """
-    from Cryptodome.PublicKey import RSA
-    from Cryptodome.Signature import PKCS1_v1_5
-    from binascii import b2a_hex
-
     if sign_algo not in ("MD5", "SHA1", "SHA256", "SHA384", "SHA512"):
         raise ValueError("Unsupported Signing algorithm")
 
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    pem_passphrase = to_bytes(pem_passphrase) or None
+    pem_private = to_bytes(pem_private)
     message = to_bytes(message)
 
-    priv_key = RSA.import_key(pem_private, passphrase=pem_passphrase)
-    signer = PKCS1_v1_5.new(priv_key)
-    digest = getattr(
-        __import__("Cryptodome.Hash", fromlist=[sign_algo]), sign_algo
-    ).new()
-    digest.update(message)
-    return b2a_hex(signer.sign(digest))
+    priv_key = load_pem_private_key(pem_private, password=pem_passphrase)
 
+    hash_algo = getattr(hashes, sign_algo)()
+
+    signature = priv_key.sign(
+        message,
+        padding.PKCS1v15(),
+        hash_algo
+    )
+
+    return signature.hex()
 
 def fsbsize(path):
     """
@@ -417,41 +421,25 @@ def replace_patterns(value, rules):
     return value
 
 
-# TODO: Remove in 0.6.x and fix exp in CookieJar.set_cookie
-def set_cookie(
-    cj, domain, name, value, path="/", exp=time.time() + timedelta(days=31).total_seconds()
-):  #: 31 days retention
-    args = [domain, name, value, path, int(exp)]
-    return cj.set_cookie(*args)
-
-
-def set_cookies(cj, cookies):
-    for cookie in cookies:
-        if not isinstance(cookie, tuple):
-            continue
-
-        if len(cookie) != 3:
-            continue
-
-        set_cookie(cj, *cookie)
-
-
 def parse_html_header(header):
     header = to_str(header, encoding="iso-8859-1")
 
     hdict = {}
-    _re = r"[ ]*(?P<key>.+?)[ ]*:[ ]*(?P<value>.+?)[ ]*\r?\n"
+    _re = r"^ *(?P<key>[!#$%&'*+-.^_`|~0-9a-zA-Z]+) *: *(?P<value>[^ ]+) *$"
 
-    for key, value in re.findall(_re, header):
-        key = key.lower()
-        if key in hdict:
-            current_value = hdict.get(key)
-            if isinstance(current_value, list):
-                current_value.append(value)
+    for header_line in header.splitlines():
+        m = re.match(_re, header_line)
+        if m is not None:
+            key = m.group("key").lower()
+            value = m.group("value")
+            if key in hdict:
+                current_value = hdict.get(key)
+                if isinstance(current_value, list):
+                    current_value.append(value)
+                else:
+                    hdict[key] = [current_value, value]
             else:
-                hdict[key] = [current_value, value]
-        else:
-            hdict[key] = value
+                hdict[key] = value
 
     return hdict
 
@@ -467,7 +455,9 @@ def parse_html_tag_attr_value(attr_name, tag):
     return m.group(2) if m else None
 
 
-def parse_html_form(attr_filter, html, input_names={}):
+def parse_html_form(attr_filter, html, input_names=None):
+    input_names = input_names or {}
+
     attr_str = "" if callable(attr_filter) else attr_filter
     for form in re.finditer(
         rf"(?P<TAG><form[^>]*{attr_str}.*?>)(?P<CONTENT>.*?)</?(form|body|html).*?>",
