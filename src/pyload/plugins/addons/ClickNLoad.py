@@ -1,33 +1,21 @@
-# -*- coding: utf-8 -*-
-
+import ipaddress
 import socket
 import ssl
 import threading
 import time
 
+from pyload import g
 from pyload.core.utils.struct.lock import lock
+from pyload.core.utils.web.convert import host_to_ip
 
 from ..base.addon import BaseAddon, threaded
-from ..helpers import forward
-
-
-def resolve_host(host):
-    try:
-        IPs = [
-            result [4][0]
-            for result in socket.getaddrinfo(host, None, family=0, type=socket.SOCK_STREAM)
-        ]
-    except socket.gaierror:
-        IPs = []
-
-    return IPs
 
 
 # TODO: IPv6 support
 class ClickNLoad(BaseAddon):
     __name__ = "ClickNLoad"
     __type__ = "addon"
-    __version__ = "0.63"
+    __version__ = "0.66"
     __status__ = "testing"
 
     __config__ = [
@@ -35,7 +23,7 @@ class ClickNLoad(BaseAddon):
         ("port", "int", "Port", 9666),
         ("extern", "bool", "Listen for external connections", True),
         ("dest", "queue;collector", "Add packages to", "collector"),
-        ("hosts_filter", "str", "allowed source hosts (e.g. host:mycomputer.ddns.com;ip:127.0.0.1", ""),
+        ("hosts_filter", "str", "allowed source hosts (e.g. mycomputer.ddns.com;127.0.0.1;192.168.1.0/24", ""),
     ]
 
     __description__ = """Click'n'Load support"""
@@ -62,8 +50,10 @@ class ClickNLoad(BaseAddon):
         if self.pyload.config.get("webui", "enabled"):
             web_host = self.pyload.config.get("webui", "host")
             web_port = self.pyload.config.get("webui", "port")
-            if web_host in ("0.0.0.0", "::"):
+            if web_host == "0.0.0.0":
                 web_host = "127.0.0.1"
+            elif web_host == "::":
+                web_host = "::1"
 
             try:
                 addrinfo = socket.getaddrinfo(
@@ -89,6 +79,9 @@ class ClickNLoad(BaseAddon):
                 test_socket.shutdown(socket.SHUT_WR)
                 self.web_addr = addr[4]
                 self.web_af = addr[0]
+
+                #: save backend address for later use
+                g.web_addr = addr[4][0]
 
                 self.log_debug(
                     self._("Backend found on {}://{}:{}").format(
@@ -148,14 +141,53 @@ class ClickNLoad(BaseAddon):
                     self._("Server was not exited gracefully, shutdown forced")
                 )
 
+    @threaded
+    def _forward(self, source, destination, finished_event=None, recv_timeout=None, buffering=1024):
+        """
+        Forward data from one socket to another
+        """
+        source.settimeout(recv_timeout)
+        try:
+            while True:
+                try:
+                    data = source.recv(buffering)
+                    if not data:  # Peer closed the connection cleanly
+                        break
+
+                    try:
+                        destination.sendall(data)
+                    except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                        break
+
+                except (ConnectionResetError, BrokenPipeError, OSError) as e:
+                    break
+
+        finally:
+            for sock in (source, destination):
+                if sock:
+                    #  Graceful shutdown
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass  # Socket may already be closed
+
+        if finished_event:
+            finished_event.set()
+
     @lock
     @threaded
-    def forward(self, client_socket, backend_socket, queue=False):
+    def forward_request(self, client_socket, backend_socket, queue=False):
         if queue:
             old_ids = set(pack.pid for pack in self.pyload.api.get_collector())
 
-        forward(client_socket, backend_socket, recv_timeout=0.5)
-        forward(backend_socket, client_socket)
+        e1 = threading.Event()
+        e2 = threading.Event()
+        self._forward(client_socket, backend_socket, recv_timeout=0.75, finished_event=e1)
+        self._forward(backend_socket, client_socket, recv_timeout=0.75, finished_event=e2)
+
+        # Wait for both directions to finish
+        e1.wait()
+        e2.wait()
 
         if queue:
             new_ids = set(pack.pid for pack in self.pyload.api.get_collector())
@@ -190,30 +222,45 @@ class ClickNLoad(BaseAddon):
                     client_socket, client_addr = dock_socket.accept()
 
                     if not self.do_exit:
-                        host, port = client_addr
+                        client_host, client_port = client_addr
+                        bad_ip = False
+                        try:
+                            client_ip = ipaddress.ip_address(client_host)
+                        except ValueError:
+                            bad_ip = True
+                        if bad_ip or not isinstance(client_ip, ipaddress.IPv4Address):
+                            self.log_error(self._("Connection from invalid/unsupported host {} ignored").format(client_host))
+                            client_socket.close()
+                            continue
+
                         hosts_filter = self.config.get("hosts_filter")
                         if hosts_filter:
-                            allowed = False
-                            for h in hosts_filter.split(";"):
+                            allowed_networks = []
+                            for host_filter in hosts_filter.split(";"):
+                                host_filter = host_filter.strip()
                                 try:
-                                    filter_type, filter_val = h.split(":")
+                                    network = ipaddress.ip_network(host_filter)
+                                    if not isinstance(network, ipaddress.IPv4Network):
+                                        continue
+                                    allowed_networks.append(network)
                                 except ValueError:
-                                    continue
-                                if filter_type == "ip":
-                                    allowed_ips = [filter_val]
-                                elif filter_type == "host":
-                                    allowed_ips = resolve_host(filter_val)
-                                else:
-                                    continue
-                                if host in allowed_ips:
-                                    allowed = True
-                                    break
-                            if not allowed:
-                                self.log_error(self._("Connection from unauthorized host {} ignored").format(host))
+                                    try:
+                                        networks = [ipaddress.ip_network(ip) for ip in host_to_ip(host_filter)]
+                                        networks = [
+                                            network
+                                            for network in networks
+                                            if isinstance(network, ipaddress.IPv4Network)
+                                        ]
+                                        allowed_networks.extend(networks)
+                                    except ValueError:
+                                        continue
+
+                            if not any(client_ip in network for network in allowed_networks):
+                                self.log_error(self._("Connection from unauthorized host {} ignored").format(client_host))
                                 client_socket.close()
                                 continue
 
-                        self.log_debug(f"Connection from {host}:{port}")
+                        self.log_debug(f"Connection from {client_host}:{client_port}")
 
                         backend_socket = socket.socket(
                             self.web_af, socket.SOCK_STREAM
@@ -226,14 +273,14 @@ class ClickNLoad(BaseAddon):
                                 context.verify_mode = ssl.CERT_NONE
                                 backend_socket = context.wrap_socket(backend_socket, server_hostname=self.web_addr[0])
 
-                            except Exception as exc:
+                            except ssl.SSLError as exc:
                                 self.log_error(self._("SSL error: {}").format(exc))
                                 client_socket.close()
                                 continue
 
                         backend_socket.connect(self.web_addr)
 
-                        self.forward(
+                        self.forward_request(
                             client_socket,
                             backend_socket,
                             self.config.get("dest") == "queue",

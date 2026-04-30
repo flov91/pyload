@@ -1,26 +1,31 @@
 import re
-from typing import Dict, Iterator, List, Optional
+from collections import UserDict
+from typing import Dict, Iterator, List, Mapping, Optional, Union
 
 from ...utils.convert import to_bytes, to_str
 
-RE_HEADERLINE = re.compile(r"^ *(?P<name>[!#$%&'*+-.^_`|~0-9a-zA-Z]+) *: *(?P<value>[^ ]+) *$")
+RE_HEADERLINE = re.compile(r"^ *(?P<name>[!#$%&'*+-.^_`|~0-9a-zA-Z]+) *: *(?P<value>.+?) *$")
 
-class HttpHeaders:
+
+class HttpHeaders(UserDict):
     """Mutable HTTP/1.1 header collection.
 
     - Header names are case-insensitive; original casing is preserved for output.
     - Multiple values per header are preserved in insertion order (last one wins for get/indexing).
     - Values are stored as stripped strings.
+    - Supports both mutable operations (set, add, remove) and immutable-friendly patterns.
     """
 
     def __init__(self):
-        self._headers: Dict[str, List[str]] = {}
+        # normalized-name (lowercase) -> list[str]
+        super().__init__()
+        self.data: Dict[str, List[Union[str, int]]] = {}
         self._original_case: Dict[str, str] = {}
 
-    def clear(self, use_defaults=False) -> None:
+    def clear(self, use_defaults: bool = False) -> None:
         """Remove all headers and reset internal state.
         """
-        self._headers = {}
+        self.data = {}
         self._original_case = {}
 
         if use_defaults:
@@ -35,7 +40,7 @@ class HttpHeaders:
             for name, value in defaults:
                 self.add(name, value)
 
-    def add(self, name: str, value: str) -> None:
+    def add(self, name: str, value: Union[str, int]) -> None:
         """Append a value to a header name without replacing existing ones.
 
         Parameters:
@@ -43,10 +48,10 @@ class HttpHeaders:
             value: Header value; leading/trailing whitespace is stripped.
         """
         key = name.lower()
-        if key not in self._headers:
-            self._headers[key] = []
+        if key not in self.data:
+            self.data[key] = []
             self._original_case[key] = name
-        self._headers[key].append(value.strip())
+        self.data[key].append(value.strip() if isinstance(value, str) else value)
 
     def remove(self, name: str, value: Optional[str] = None) -> bool:
         """Remove header(s).
@@ -60,62 +65,62 @@ class HttpHeaders:
             True if any removal occurred; False if the header did not exist or no values matched.
         """
         key = name.lower()
-        if key not in self._headers:
+        if key not in self.data:
             return False
 
         if value is None:
             # Remove entire header
-            del self._headers[key]
+            del self.data[key]
             self._original_case.pop(key, None)
             return True
         else:
             # Remove only specific value(s)
-            cleaned = [v for v in self._headers[key] if v != value.strip()]
-            is_removed = len(cleaned) < len(self._headers[key])
+            cleaned = [v for v in self.data[key] if v != value.strip()]
+            is_removed = len(cleaned) < len(self.data[key])
 
             if not cleaned:
                 # Last value removed → delete the header completely
-                del self._headers[key]
-                del self._original_case.pop[key]
+                del self.data[key]
+                self._original_case.pop(key, None)
             else:
-                self._headers[key] = cleaned
+                self.data[key] = cleaned
 
             return is_removed
 
-    def get(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    def get(self, name: str, default: Optional[Union[str, int]] = None) -> Optional[Union[str, int]]:
         """Return the last value for a header or a default if the header is missing.
 
         Follows the convention that the most recently set value takes precedence.
         """
         values = self.get_list(name)
-        return values[-1] if values else default   # last one wins (common convention)
+        return values[-1] if values else default  # last one wins (common convention)
 
-    def set(self, name: str, value: str) -> None:
+    def set(self, name: str, value: Union[str, int]) -> None:
         """Set a header to a single value, replacing all existing values for the name."""
         key = name.lower()
-        self._headers[key] = [value.strip()]
+        self.data[key] = [value.strip() if isinstance(value, str) else value]
         self._original_case[key] = name
 
     def keys(self) -> Iterator[str]:
         """Iterate header names using their original case when possible."""
-        for norm_key in self._headers:
+        for norm_key in self.data:
             yield self._original_case.get(norm_key, norm_key)
 
-    def get_list(self, name: str) -> List[str]:
+    def get_list(self, name: str) -> List[Union[str, int]]:
         """Return all values for a header name, or an empty list if not present."""
-        return self._headers.get(name.lower(), [])
+        return self.data.get(name.lower(), [])
 
     def as_lines(self) -> List[str]:
         """Return headers formatted as a list of "Name: Value" strings in insertion order."""
-        lines = []
-        for key in self._headers:
+        lines: List[str] = []
+        for key in self.data:
             name = self._original_case.get(key, key)
-            for value in self._headers[key]:
+            for value in self.data[key]:
                 lines.append(f"{name}: {value}")
 
         return lines
 
-    def parse(self, raw_headers: bytes, reset=True) -> None:
+    def parse(self, raw_headers: bytes, reset: bool = True) -> None:
         """Parse an HTTP/1.1 header block from raw bytes and load the fields.
 
         Decoding uses ISO-8859-1 per RFC 7230.
@@ -151,24 +156,24 @@ class HttpHeaders:
         lines = self.as_lines()
         return [to_bytes(line, encoding="iso-8859-1") for line in lines]
 
-    def __getitem__(self, name: str) -> str:
+    def __getitem__(self, name: str) -> Union[str, int]:
         """Dictionary-like access; returns the last value for a header or raises KeyError."""
         values = self.get_list(name)
         if not values:
             raise KeyError(name)
         return values[-1]
 
-    def __setitem__(self, name: str, value: str) -> None:
+    def __setitem__(self, name: str, value: Union[str, int]) -> None:
         """Dictionary-like assignment; replaces all values for the header with a single value."""
         self.set(name, value)  # replace all previous values
 
     def __contains__(self, key: str) -> bool:
         """Return True if a header name exists (case-insensitive)."""
-        return key.lower() in self._headers
+        return key.lower() in self.data
 
     def __bool__(self):
         """Return True if actually has some headers."""
-        return bool(self._headers)
+        return bool(self.data)
 
     def __str__(self) -> str:
         """Human-readable CRLF-joined header lines (without trailing CRLF)."""
@@ -177,3 +182,48 @@ class HttpHeaders:
     def __bytes__(self) -> bytes:
         """Alias for to_wire(); returns the serialized header block as bytes."""
         return self.to_wire()
+
+    def copy(self) -> "HttpHeaders":
+        """Return a shallow copy of this header collection."""
+        new_headers = HttpHeaders()
+        new_headers.data = {k: list(v) for k, v in self.data.items()}
+        new_headers._original_case = dict(self._original_case)
+        return new_headers
+
+    def with_set(self, name: str, value: Union[str, int]) -> "HttpHeaders":
+        """Return a new HttpHeaders with the given header set (immutable-friendly pattern).
+
+        This does not modify the current instance.
+        """
+        new_headers = self.copy()
+        new_headers.set(name, value)
+        return new_headers
+
+    def with_set_many(self, headers: Mapping[str, Union[str, int]]) -> "HttpHeaders":
+        """Return a new HttpHeaders with the provided headers set (immutable-friendly pattern).
+
+        This does not modify the current instance.
+        """
+        new_headers = self.copy()
+        for key, value in headers.items():
+            new_headers.set(key, value)
+        return new_headers
+
+    def with_added(self, name: str, value: Union[str, int]) -> "HttpHeaders":
+        """Return a new HttpHeaders with the given header added (immutable-friendly pattern).
+
+        This does not modify the current instance.
+        """
+        new_headers = self.copy()
+        new_headers.add(name, value)
+        return new_headers
+
+    def with_added_many(self, headers: Mapping[str, Union[str, int]]) -> "HttpHeaders":
+        """Return a new HttpHeaders with the provided headers added (immutable-friendly pattern).
+
+        This does not modify the current instance.
+        """
+        new_headers = self.copy()
+        for key, value in headers.items():
+            new_headers.add(key, value)
+        return new_headers

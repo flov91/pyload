@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-
-import traceback
-
 import flask
 from flask_wtf.csrf import CSRFError
 
@@ -14,7 +10,6 @@ def handle_404_error(exc):
     return render_template('error.html', messages=messages), 404
 
 def handle_exception_error(exc):
-    tb = traceback.format_exc()
     try:
         code = exc.code
         desc = exc.desc
@@ -24,14 +19,17 @@ def handle_exception_error(exc):
 
     flask.current_app.logger.debug(exc, exc_info=True)
 
-    messages = [f"Error {code}: {desc}"]
-    messages.extend(tb.split('\n'))
-    return render_template("error.html", messages=messages), code
+    message = f"Error {code}: {desc}"
+    flask.current_app.logger.error(message, exc_info=True)
+    return render_template("error.html", messages=[message]), code
 
 
 def handle_csrf_error(exc):
     flask.current_app.logger.debug(f"CSRF Error: {exc.description}")
-    return flask.jsonify({"error": "CSRF token is invalid"}), 400
+    if flask.request.headers.get("Content-Type") == "application/json":
+        return flask.jsonify({"error": "CSRF token is invalid"}), 400
+    else:
+        return "CSRF token is invalid", 400
 
 
 ERROR_HANDLERS = [
