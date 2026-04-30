@@ -15,7 +15,8 @@ class AnnaArchive(SimpleDownloader):
     __version__ = "0.01"
     __status__ = "testing"
 
-    __pattern__ = r"(?i)https?://(?:fr\.)?(annas-archive|welib)\.(org|se|li)/.*"
+    # __pattern__ = r"(?i)https?://(?:fr\.)?(annas-archive|welib)\.(org|se|li)/.*"
+    __pattern__ = r"(?i)https?://(?:fr\.)?(annas-archive|welib)\.[a-z]{2,}/.*"
     __config__ = [
         ("enabled", "enabled", "Activated", True),
         ("use_premium", "bool", "Use premium account if available", False),
