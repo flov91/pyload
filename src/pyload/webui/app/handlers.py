@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import traceback
 
 import flask
@@ -31,7 +29,10 @@ def handle_exception_error(exc):
 
 def handle_csrf_error(exc):
     flask.current_app.logger.debug(f"CSRF Error: {exc.description}")
-    return flask.jsonify({"error": "CSRF token is invalid"}), 400
+    if flask.request.headers.get("Content-Type") == "application/json":
+        return flask.jsonify({"error": "CSRF token is invalid"}), 400
+    else:
+        return "CSRF token is invalid", 400
 
 
 ERROR_HANDLERS = [
