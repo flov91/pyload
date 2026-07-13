@@ -58,7 +58,7 @@ class ArchiveQueue:
 class ExtractArchive(BaseAddon):
     __name__ = "ExtractArchive"
     __type__ = "addon"
-    __version__ = "1.73"
+    __version__ = "1.74"
     __status__ = "testing"
 
     __config__ = [
@@ -265,7 +265,7 @@ class ExtractArchive(BaseAddon):
                     )
                     for fdata in pypack.get_children().values()
                 }.values()
-            )  #: : Remove duplicates
+            )  #: Remove duplicates
 
             #: Check as long there are unseen files
             while files_ids:
@@ -296,12 +296,11 @@ class ExtractArchive(BaseAddon):
                         matched = True
 
                         for fid, fname, fout in targets:
-                            name = os.path.basename(fname)
-
                             if not exists(fname):
                                 self.log_debug(name, "File not found")
                                 continue
 
+                            name = os.path.basename(fname)
                             self.log_info(name, self._("Extract to: {}").format(fout))
                             try:
                                 pyfile = self.pyload.files.get_file(fid)
@@ -564,7 +563,6 @@ class ExtractArchive(BaseAddon):
 
         raise Exception(self._("Extract failed"))
 
-    @expose
     def get_passwords(self, reload=True):
         """
         List of saved passwords.
@@ -579,13 +577,13 @@ class ExtractArchive(BaseAddon):
             passwords = []
 
             file = os.fsdecode(self.config.get("passwordfile"))
-            with open(file) as fp:
+            with open(file, encoding="utf-8-sig") as fp:
                 for pw in fp.read().splitlines():
                     passwords.append(pw)
 
         except IOError as exc:
             if exc.errno == 2:
-                fp = open(file, mode="w")
+                fp = open(file, mode="w", encoding="utf-8-sig")
                 fp.close()
 
             else:
@@ -603,7 +601,7 @@ class ExtractArchive(BaseAddon):
             self.passwords = uniquify([password] + self.passwords)
 
             file = os.fsdecode(self.config.get("passwordfile"))
-            with open(file, mode="w") as fp:
+            with open(file, mode="w", encoding="utf-8-sig") as fp:
                 for pw in self.passwords:
                     fp.write(pw + "\n")
 
